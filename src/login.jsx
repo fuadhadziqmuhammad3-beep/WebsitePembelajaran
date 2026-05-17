@@ -3,6 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { db } from "./firebase";
 import { ref, get, set } from "firebase/database";
 
+/* Credentials admin — hardcoded, tidak disimpan di Firebase */
+const ADMIN_USER = "admin";
+const ADMIN_PASS = "localAdmin09";
+
 export default function Login() {
   const [mode, setMode] = useState("login"); // "login" | "register"
   const [username, setUsername] = useState("");
@@ -20,7 +24,20 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      const snap = await get(ref(db, `users/${username}`));
+      // --- Cek admin dulu ---
+      if (username.trim() === ADMIN_USER) {
+        if (password !== ADMIN_PASS) {
+          setError("Password admin salah.");
+          return;
+        }
+        localStorage.setItem("user", ADMIN_USER);
+        localStorage.removeItem("globalXP");
+        navigate("/admin");
+        return;
+      }
+
+      // --- Login user biasa ---
+      const snap = await get(ref(db, `users/${username.trim()}`));
       if (!snap.exists()) {
         setError("Username tidak ditemukan.");
         return;
@@ -30,7 +47,7 @@ export default function Login() {
         setError("Password salah.");
         return;
       }
-      localStorage.setItem("user", username);
+      localStorage.setItem("user", username.trim());
       localStorage.setItem("globalXP", data.xp || 0);
       navigate("/home");
     } catch (e) {
@@ -45,7 +62,12 @@ export default function Login() {
       setError("Semua field wajib diisi.");
       return;
     }
-    if (username.length < 3) {
+    // Cegah daftar dengan username "admin"
+    if (username.trim().toLowerCase() === ADMIN_USER) {
+      setError("Username tersebut tidak tersedia.");
+      return;
+    }
+    if (username.trim().length < 3) {
       setError("Username minimal 3 karakter.");
       return;
     }
@@ -60,18 +82,18 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      const snap = await get(ref(db, `users/${username}`));
+      const snap = await get(ref(db, `users/${username.trim()}`));
       if (snap.exists()) {
         setError("Username sudah dipakai, pilih yang lain.");
         return;
       }
-      await set(ref(db, `users/${username}`), {
-        username,
+      await set(ref(db, `users/${username.trim()}`), {
+        username: username.trim(),
         password,
         xp: 0,
         createdAt: Date.now(),
       });
-      localStorage.setItem("user", username);
+      localStorage.setItem("user", username.trim());
       localStorage.setItem("globalXP", 0);
       navigate("/home");
     } catch (e) {
@@ -224,6 +246,20 @@ export default function Login() {
         >
           {loading ? "Memproses..." : mode === "login" ? "Masuk →" : "Daftar Sekarang →"}
         </button>
+      </div>
+
+      {/* Footer */}
+      <div style={{ position: 'relative', zIndex: 1, marginTop: '2rem', textAlign: 'center' }}>
+        <a href="https://wa.me/6285814577050" target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', textDecoration: 'none', transition: 'color 0.2s' }}
+          onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.25)'}
+        >
+          💬 Hubungi Admin: 085814577050
+        </a>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.15)', marginTop: 4 }}>
+          © {new Date().getFullYear()} C-Solve
+        </div>
       </div>
     </div>
   );
