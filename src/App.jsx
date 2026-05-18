@@ -28,7 +28,9 @@ function AppLayout({ children }) {
   return <>{user === ADMIN_USER ? <AdminNavbar /> : <Navbar />}{children}</>;
 }
 
-/* ── Save XP to Firebase (simpan SKOR TERTINGGI per level, bukan akumulasi langsung) ── */
+/* ══════════════════════════════════════════
+   FIX BUG 1: Save XP — hitung ulang dari levelScores, BUKAN akumulasi
+══════════════════════════════════════════ */
 async function saveXPToFirebase(username, level, newLevelScore) {
   try {
     const snap = await get(ref(db, `users/${username}`));
@@ -38,17 +40,19 @@ async function saveXPToFirebase(username, level, newLevelScore) {
     const prevScores = data.levelScores || {};
     const prevBest = prevScores[`level${level}`] || 0;
 
-    // Hitung selisih XP yang benar-benar baru
-    const xpGain = Math.max(0, newLevelScore - prevBest);
-    const totalXP = (data.xp || 0) + xpGain;
+    // Simpan skor terbaik untuk level ini
+    const updatedScores = {
+      ...prevScores,
+      [`level${level}`]: Math.max(prevBest, newLevelScore),
+    };
+
+    // ✅ FIXED: Hitung total XP dari SEMUA levelScores, bukan akumulasi
+    const totalXP = Object.values(updatedScores).reduce((sum, s) => sum + (s || 0), 0);
 
     await set(ref(db, `users/${username}`), {
       ...data,
       xp: totalXP,
-      levelScores: {
-        ...prevScores,
-        [`level${level}`]: Math.max(prevBest, newLevelScore),
-      },
+      levelScores: updatedScores,
     });
     localStorage.setItem('globalXP', totalXP);
   } catch (e) {
@@ -67,7 +71,6 @@ function Navbar() {
   const [scrolled, setScrolled] = React.useState(false);
   const user = localStorage.getItem('user') || 'User';
 
-  // Sync XP dari Firebase secara realtime
   React.useEffect(() => {
     if (!user) return;
     const xpRef = ref(db, `users/${user}/xp`);
@@ -229,7 +232,6 @@ function HomePage() {
         >Mulai Latihan →</Link>
       </div>
 
-      {/* Footer */}
       <div style={{
         position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1,
         borderTop: '1px solid rgba(255,255,255,0.06)',
@@ -253,7 +255,7 @@ function HomePage() {
 }
 
 /* ══════════════════════════════════════════
-   LATIHAN PAGE — unlock pakai levelScores dari Firebase
+   LATIHAN PAGE
 ══════════════════════════════════════════ */
 function LatihanPage() {
   const levels = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -261,7 +263,6 @@ function LatihanPage() {
   const user = localStorage.getItem('user');
   const [levelScores, setLevelScores] = React.useState({});
 
-  // Ambil levelScores dari Firebase realtime
   React.useEffect(() => {
     if (!user) return;
     const scoresRef = ref(db, `users/${user}/levelScores`);
@@ -289,52 +290,50 @@ function LatihanPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', padding: '120px 2rem 4rem', fontFamily: 'Poppins, sans-serif', position: 'relative', overflow: 'hidden' }}>
-      {/* Background decorations */}
       <div style={{ position: 'absolute', top: '5%', left: '10%', width: 500, height: 500, borderRadius: '50%', background: 'rgba(250,204,21,0.05)', filter: 'blur(100px)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', bottom: '10%', right: '5%', width: 400, height: 400, borderRadius: '50%', background: 'rgba(251,146,60,0.04)', filter: 'blur(90px)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', top: '50%', right: '20%', width: 300, height: 300, borderRadius: '50%', background: 'rgba(167,139,250,0.03)', filter: 'blur(80px)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(250,204,21,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(250,204,21,0.03) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
 
       <div style={{ position: 'relative', zIndex: 1 }}>
-      <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-        <h1 style={{ fontSize: 48, fontWeight: 900, color: '#fff', marginBottom: 8 }}>Pilih Latihan</h1>
-        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 16 }}>Selesaikan setiap level untuk unlock level berikutnya</p>
-      </div>
+        <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+          <h1 style={{ fontSize: 48, fontWeight: 900, color: '#fff', marginBottom: 8 }}>Pilih Latihan</h1>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 16 }}>Selesaikan setiap level untuk unlock level berikutnya</p>
+        </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1.25rem', maxWidth: 1100, margin: '0 auto' }}>
-        {levels.map((level) => {
-          const score = getScore(level);
-          const stars = getStars(score);
-          const unlocked = isUnlocked(level);
-          const accent = accents[level - 1];
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1.25rem', maxWidth: 1100, margin: '0 auto' }}>
+          {levels.map((level) => {
+            const score = getScore(level);
+            const stars = getStars(score);
+            const unlocked = isUnlocked(level);
+            const accent = accents[level - 1];
 
-          return (
-            <div key={level} style={{ background: unlocked ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '1.75rem', position: 'relative', overflow: 'hidden', transition: 'all 0.3s', opacity: unlocked ? 1 : 0.45, cursor: unlocked ? 'pointer' : 'not-allowed' }}
-              onMouseEnter={e => { if (unlocked) { e.currentTarget.style.borderColor = accent + '60'; e.currentTarget.style.transform = 'translateY(-4px)'; }}}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.transform = 'translateY(0)'; }}
-            >
-              {unlocked && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${accent}, transparent)`, borderRadius: '20px 20px 0 0' }} />}
-              {unlocked ? (
-                <Link to="/exercise" state={{ level }} style={{ textDecoration: 'none' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, letterSpacing: '0.1em', marginBottom: 8 }}>LEVEL {level}</div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Latihan {level}</div>
-                  <div style={{ display: 'flex', gap: 3, marginBottom: 10 }}>
-                    {[1,2,3].map(s => <span key={s} style={{ fontSize: 15, color: s <= stars ? accent : 'rgba(255,255,255,0.15)' }}>★</span>)}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: 600 }}>{score > 0 ? `Best: ${score} XP` : 'Belum dimulai'}</div>
-                </Link>
-              ) : (
-                <>
-                  <div style={{ fontSize: 30, marginBottom: 8 }}>🔒</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>Terkunci</div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>Selesaikan level sebelumnya</div>
-                </>
-              )}
-            </div>
-          );
-        })}
+            return (
+              <div key={level} style={{ background: unlocked ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '1.75rem', position: 'relative', overflow: 'hidden', transition: 'all 0.3s', opacity: unlocked ? 1 : 0.45, cursor: unlocked ? 'pointer' : 'not-allowed' }}
+                onMouseEnter={e => { if (unlocked) { e.currentTarget.style.borderColor = accent + '60'; e.currentTarget.style.transform = 'translateY(-4px)'; }}}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+              >
+                {unlocked && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${accent}, transparent)`, borderRadius: '20px 20px 0 0' }} />}
+                {unlocked ? (
+                  <Link to="/exercise" state={{ level }} style={{ textDecoration: 'none' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: accent, letterSpacing: '0.1em', marginBottom: 8 }}>LEVEL {level}</div>
+                    <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Latihan {level}</div>
+                    <div style={{ display: 'flex', gap: 3, marginBottom: 10 }}>
+                      {[1,2,3].map(s => <span key={s} style={{ fontSize: 15, color: s <= stars ? accent : 'rgba(255,255,255,0.15)' }}>★</span>)}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: 600 }}>{score > 0 ? `Best: ${score} XP` : 'Belum dimulai'}</div>
+                  </Link>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 30, marginBottom: 8 }}>🔒</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>Terkunci</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>Selesaikan level sebelumnya</div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-      </div> {/* end zIndex wrapper */}
     </div>
   );
 }
@@ -374,7 +373,6 @@ function ExercisePage() {
   async function handleFinish(finalScore) {
     if (finished) return;
     setFinished(true);
-    // Kirim level juga supaya bisa cek best score
     await saveXPToFirebase(user, level, finalScore);
     navigate('/finish', { state: { score: finalScore, level } });
   }
@@ -485,7 +483,7 @@ function ExercisePage() {
 }
 
 /* ══════════════════════════════════════════
-   LEADERBOARD PAGE — REALTIME FIREBASE
+   LEADERBOARD PAGE — FIX BUG 2: Podium benar
 ══════════════════════════════════════════ */
 function LeaderboardPage() {
   const [players, setPlayers] = React.useState([]);
@@ -514,7 +512,6 @@ function LeaderboardPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', padding: '120px 2rem 4rem', fontFamily: 'Poppins, sans-serif', position: 'relative', overflow: 'hidden' }}>
-      {/* Background decorations */}
       <div style={{ position: 'absolute', top: '5%', left: '50%', transform: 'translateX(-50%)', width: 600, height: 400, borderRadius: '50%', background: 'rgba(250,204,21,0.05)', filter: 'blur(100px)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', bottom: '10%', left: '5%', width: 350, height: 350, borderRadius: '50%', background: 'rgba(148,163,184,0.04)', filter: 'blur(80px)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', bottom: '10%', right: '5%', width: 350, height: 350, borderRadius: '50%', background: 'rgba(251,146,60,0.04)', filter: 'blur(80px)', pointerEvents: 'none' }} />
@@ -533,21 +530,40 @@ function LeaderboardPage() {
         ) : (
           <>
             {players.length >= 3 && (
+              // ✅ FIXED: Podium — urutan tampilan [rank2, rank1, rank3]
+              // players[0]=rank1, players[1]=rank2, players[2]=rank3
+              // Tampil di layar: players[1] (kiri), players[0] (tengah-tinggi), players[2] (kanan)
               <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '1rem', marginBottom: '3rem' }}>
-                {[1, 0, 2].map((idx) => {
-                  if (!players[idx]) return null;
-                  const p = players[idx];
-                  const podiumH = [140, 180, 110];
-                  const h = podiumH[idx === 1 ? 0 : idx === 0 ? 1 : 2];
-                  const rank = idx === 1 ? '1' : idx === 0 ? '2' : '3';
-                  const isMe = p.name === currentUser;
+                {[
+                  { player: players[1], rank: 2, color: podiumColors[1], badge: badges[1], podiumHeight: 130 },
+                  { player: players[0], rank: 1, color: podiumColors[0], badge: badges[0], podiumHeight: 180 },
+                  { player: players[2], rank: 3, color: podiumColors[2], badge: badges[2], podiumHeight: 100 },
+                ].map(({ player, rank, color, badge, podiumHeight }) => {
+                  const isMe = player.name === currentUser;
                   return (
-                    <div key={idx} style={{ textAlign: 'center', flex: 1, maxWidth: 180 }}>
-                      <div style={{ fontSize: 28, marginBottom: 6 }}>{badges[idx] || ''}</div>
-                      <div style={{ width: 52, height: 52, borderRadius: '50%', margin: '0 auto 8px', background: `${podiumColors[idx]}20`, border: `2px solid ${isMe ? '#fff' : podiumColors[idx]}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: podiumColors[idx] }}>{p.name[0].toUpperCase()}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: isMe ? '#facc15' : '#fff', marginBottom: 4 }}>{p.name}{isMe ? ' (Kamu)' : ''}</div>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: podiumColors[idx], marginBottom: 8 }}>{p.point} XP</div>
-                      <div style={{ height: h, background: `linear-gradient(180deg, ${podiumColors[idx]}30, ${podiumColors[idx]}10)`, border: `1px solid ${podiumColors[idx]}40`, borderRadius: '12px 12px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 900, color: podiumColors[idx] }}>{rank}</div>
+                    <div key={rank} style={{ textAlign: 'center', flex: 1, maxWidth: 180 }}>
+                      <div style={{ fontSize: 28, marginBottom: 6 }}>{badge}</div>
+                      <div style={{
+                        width: 52, height: 52, borderRadius: '50%', margin: '0 auto 8px',
+                        background: `${color}20`,
+                        border: `2px solid ${isMe ? '#fff' : color}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 18, fontWeight: 800, color,
+                      }}>
+                        {player.name[0].toUpperCase()}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isMe ? '#facc15' : '#fff', marginBottom: 4 }}>
+                        {player.name}{isMe ? ' (Kamu)' : ''}
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color, marginBottom: 8 }}>{player.point} XP</div>
+                      <div style={{
+                        height: podiumHeight,
+                        background: `linear-gradient(180deg, ${color}30, ${color}10)`,
+                        border: `1px solid ${color}40`,
+                        borderRadius: '12px 12px 0 0',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 22, fontWeight: 900, color,
+                      }}>{rank}</div>
                     </div>
                   );
                 })}
@@ -594,7 +610,6 @@ function TentangPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', padding: '120px 2rem 4rem', fontFamily: 'Poppins, sans-serif', position: 'relative', overflow: 'hidden' }}>
-      {/* Background decorations */}
       <div style={{ position: 'absolute', top: '10%', right: '10%', width: 450, height: 450, borderRadius: '50%', background: 'rgba(250,204,21,0.05)', filter: 'blur(100px)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', bottom: '15%', left: '5%', width: 350, height: 350, borderRadius: '50%', background: 'rgba(96,165,250,0.04)', filter: 'blur(90px)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(250,204,21,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(250,204,21,0.03) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
@@ -662,13 +677,13 @@ function FinishPage() {
 }
 
 /* ══════════════════════════════════════════
-   ADMIN PAGE — Dashboard kelola user
+   ADMIN PAGE
 ══════════════════════════════════════════ */
 function AdminPage() {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [confirmDelete, setConfirmDelete] = React.useState(null);
-  const [editUser, setEditUser] = React.useState(null); // { name, xp }
+  const [editUser, setEditUser] = React.useState(null);
   const [editXP, setEditXP] = React.useState('');
   const [toast, setToast] = React.useState('');
 
@@ -730,7 +745,6 @@ function AdminPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', padding: '120px 2rem 4rem', fontFamily: 'Poppins, sans-serif' }}>
-      {/* Toast */}
       {toast && (
         <div style={{ position: 'fixed', bottom: 32, right: 32, zIndex: 999, background: 'rgba(30,30,30,0.97)', border: '1px solid rgba(250,204,21,0.4)', borderRadius: 14, padding: '14px 22px', color: '#facc15', fontWeight: 700, fontSize: 14, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
           ✓ {toast}
@@ -738,14 +752,12 @@ function AdminPage() {
       )}
 
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
-        {/* Header */}
         <div style={{ marginBottom: '2.5rem' }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 100, padding: '6px 18px', marginBottom: '1rem', fontSize: 12, color: '#ef4444', fontWeight: 700 }}>🛡 Admin Dashboard</div>
           <h1 style={{ fontSize: 40, fontWeight: 900, color: '#fff', marginBottom: 6 }}>Manajemen User</h1>
           <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>Data diperbarui secara realtime dari Firebase</p>
         </div>
 
-        {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
           {[
             { label: 'Total User', value: totalUsers, color: '#60a5fa', icon: '👤' },
@@ -760,14 +772,12 @@ function AdminPage() {
           ))}
         </div>
 
-        {/* User Table */}
         {loading ? (
           <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.4)', padding: '4rem' }}>Memuat data...</div>
         ) : users.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', padding: '4rem' }}>Belum ada user terdaftar.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-            {/* Header row */}
             <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 100px 120px 180px', gap: '1rem', padding: '0.75rem 1.25rem', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>
               <span>#</span><span>USERNAME</span><span style={{ textAlign: 'right' }}>XP</span><span style={{ textAlign: 'center' }}>LEVEL</span><span style={{ textAlign: 'center' }}>AKSI</span>
             </div>
@@ -786,17 +796,14 @@ function AdminPage() {
                   <span style={{ textAlign: 'right', fontWeight: 800, color: '#facc15', fontSize: 14 }}>{u.xp || 0}</span>
                   <span style={{ textAlign: 'center', fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>{levelCount} / 12 selesai</span>
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                    {/* Edit XP */}
                     <button onClick={() => { setEditUser({ name: u.username, xp: u.xp || 0 }); setEditXP(String(u.xp || 0)); }}
                       style={{ padding: '5px 12px', borderRadius: 8, background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}>
                       Edit XP
                     </button>
-                    {/* Reset */}
                     <button onClick={() => handleResetXP(u.username)}
                       style={{ padding: '5px 12px', borderRadius: 8, background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.25)', color: '#facc15', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}>
                       Reset
                     </button>
-                    {/* Delete */}
                     <button onClick={() => setConfirmDelete(u.username)}
                       style={{ padding: '5px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}>
                       Hapus
@@ -809,7 +816,6 @@ function AdminPage() {
         )}
       </div>
 
-      {/* Modal: Konfirmasi hapus */}
       {confirmDelete && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#111', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 24, padding: '2.5rem', maxWidth: 380, width: '90%', textAlign: 'center' }}>
@@ -832,7 +838,6 @@ function AdminPage() {
         </div>
       )}
 
-      {/* Modal: Edit XP */}
       {editUser && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#111', border: '1px solid rgba(96,165,250,0.3)', borderRadius: 24, padding: '2.5rem', maxWidth: 360, width: '90%', textAlign: 'center' }}>
@@ -870,7 +875,6 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
-        {/* Admin route — hanya bisa diakses user 'admin' */}
         <Route path="/admin" element={
           <AdminRoute><AppLayout><AdminPage /></AppLayout></AdminRoute>
         } />
